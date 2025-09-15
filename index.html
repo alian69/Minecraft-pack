@@ -102,8 +102,8 @@
   <header><h1>Minecraft packs</h1></header>
   <div class="container">
     <div style="text-align:center; padding: 20px; border: 2px dashed #7f5af0; border-radius: 12px;">
-      <p style="margin: 0;"></p>
-      <p style="font-size: 0.9em; margin: 5px 0 0;"></p>
+      <p style="margin: 0;">Files are loaded automatically from this repository.</p>
+      <p style="font-size: 0.9em; margin: 5px 0 0;">Just add your .mcpack or .mcworld files to the repo!</p>
     </div>
     <input type="text" id="searchInput" placeholder="Search packs..." style="padding:8px; border-radius:6px; border:1px solid #666;">
     <div class="files" id="fileList"></div>
@@ -131,13 +131,27 @@
           throw new Error('Failed to fetch repository contents. Please check your username and repository name.');
         }
         const data = await response.json();
-        const relevantFiles = data.filter(file => 
-          (file.name.endsWith('.mcpack') || file.name.endsWith('.mcworld'))
+        
+        const mcFiles = data.filter(file => 
+          file.name.endsWith('.mcpack') || file.name.endsWith('.mcworld')
         ).map(file => ({
           name: file.name,
-          download_url: RAW_URL + file.name
+          download_url: RAW_URL + file.name,
+          thumbnail_url: null
         }));
-        allFiles = relevantFiles;
+
+        const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
+        mcFiles.forEach(mcFile => {
+          const baseName = mcFile.name.split('.').slice(0, -1).join('.');
+          const thumbFile = data.find(file => 
+            imageExtensions.some(ext => file.name === `${baseName}${ext}`)
+          );
+          if (thumbFile) {
+            mcFile.thumbnail_url = RAW_URL + thumbFile.name;
+          }
+        });
+
+        allFiles = mcFiles;
         renderFiles(allFiles);
       } catch (error) {
         fileList.innerHTML = `<div style="text-align:center;color:#ff5470;font-weight:bold;">Error: ${error.message}</div>`;
@@ -157,6 +171,13 @@
         let div = document.createElement('div');
         div.className = 'file';
         
+        if (file.thumbnail_url) {
+          let thumb = document.createElement('img');
+          thumb.className = 'thumb';
+          thumb.src = file.thumbnail_url;
+          div.appendChild(thumb);
+        }
+
         let name = document.createElement('div');
         name.className = 'name';
         name.textContent = file.name;
@@ -169,7 +190,7 @@
         dl.className = 'btn';
         dl.textContent = 'Download';
         dl.href = file.download_url;
-        dl.download = file.name; // This attribute suggests a filename for the downloaded file
+        dl.download = file.name;
         
         actions.appendChild(dl);
         div.appendChild(actions);
