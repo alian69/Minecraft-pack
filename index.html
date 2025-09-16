@@ -39,12 +39,13 @@
     }
     .file{
       display:flex; 
-      flex-direction:column;
+      flex-direction:row;
       align-items:center; 
       justify-content: flex-start; 
       padding:16px 0 10px 0; 
       border-bottom:1px solid #333; 
       position:relative;
+      gap: 20px;
     }
     .meta{
       display:flex; 
@@ -52,11 +53,21 @@
       gap:10px; 
       margin-top: 10px;
     }
+    .thumbnail{
+      width:64px;
+      height:64px;
+      border-radius:10px;
+      object-fit:cover;
+      background:#232338;
+      border:2px solid var(--accent);
+      margin-right:8px;
+    }
     .name{
       font-weight:700; 
       color:var(--accent);
       word-break: break-all;
-      text-align:center;
+      text-align:left;
+      font-size: 1.13em;
     }
     .actions{display:flex; gap:6px; justify-content:center; margin-top:8px;}
     #loadingOverlay {
@@ -80,7 +91,7 @@
       justify-content: flex-start;
       padding-top: 90px;
     }
-    #adsContainer {
+    #adsContainerTop {
       width: 360px;
       min-height: 60px;
       margin-bottom: 24px;
@@ -118,6 +129,7 @@
       font-weight: bold;
       font-size: 1.1em;
       text-align: center;
+      white-space: pre-line;
     }
     #downloadFileName {
       font-size: 1.2em;
@@ -136,6 +148,23 @@
       margin-top: 18px;
       display: none;
     }
+    #adsContainerBottom {
+      width: 100vw;
+      position: fixed;
+      left: 0;
+      bottom: 0;
+      z-index: 99999;
+      background: #232338;
+      min-height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 -4px 24px rgba(0,0,0,0.18);
+    }
+    @media (max-width: 600px){
+      .container{padding: 12px;}
+      #downloadBar, #adsContainerTop, #adsContainerBottom {width: 98vw;}
+    }
   </style>
   <!-- Google AdSense (replace with your own client/slot IDs) -->
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
@@ -145,7 +174,7 @@
   <div class="container">
     <div style="text-align:center; padding: 20px; border: 2px dashed #7f5af0; border-radius: 12px;">
       <p style="margin: 0;">Files are loaded automatically from this repository.</p>
-      <p style="font-size: 0.9em; margin: 5px 0 0;">Just add your .mcpack or .mcworld files to the repo!</p>
+      <p style="font-size: 0.9em; margin: 5px 0 0;">Just add your .mcpack or .mcworld files to the repo!<br>Thumbnails (same name + .png) will show automatically.</p>
     </div>
     <input type="text" id="searchInput" placeholder="Search packs..." style="padding:8px; border-radius:6px; border:1px solid #666;">
     <div class="files" id="fileList"></div>
@@ -156,12 +185,13 @@
   </div>
   <!-- Downloading Screen -->
   <div id="downloadingScreen">
-    <div id="adsContainer">
-      <!-- Google AdSense ad slot -->
+    <div id="adsContainerTop">
+      <!-- Google AdSense ad slot (TOP) -->
+      <!-- There is your ad code -->
       <ins class="adsbygoogle"
            style="display:block"
-           data-ad-client="ca-pub-xxxxxxxxxxxxxxxx"
-           data-ad-slot="1234567890"
+           data-ad-client="there is your ad id"
+           data-ad-slot="there is your ad code"
            data-ad-format="auto"
            data-full-width-responsive="true"></ins>
       <script>
@@ -176,6 +206,20 @@
       <div id="progressText"></div>
       <button id="downloadCancelBtn">Cancel Download</button>
     </div>
+  </div>
+  <!-- Banner ads bottom -->
+  <div id="adsContainerBottom">
+    <!-- Google AdSense ad slot (BOTTOM) -->
+    <!-- There is your ad code -->
+    <ins class="adsbygoogle"
+         style="display:block"
+         data-ad-client="there is your ad id"
+         data-ad-slot="there is your ad code"
+         data-ad-format="auto"
+         data-full-width-responsive="true"></ins>
+    <script>
+      (adsbygoogle = window.adsbygoogle || []).push({});
+    </script>
   </div>
   <script>
     const GH_USERNAME = "alian69";
@@ -195,9 +239,11 @@
     const downloadCancelBtn = document.getElementById('downloadCancelBtn');
 
     let allFiles = [];
+    let allThumbs = {};
     let currentDownload = null;
 
-    async function fetchFiles() {
+    // Load only 13 files first
+    async function fetchFiles(limit = 13) {
       loadingOverlay.style.display = 'flex';
       try {
         const response = await fetch(API_URL);
@@ -205,17 +251,67 @@
           throw new Error('Failed to fetch repository contents. Please check your username and repository name.');
         }
         const data = await response.json();
+
+        // Sort alphabetically for consistency
+        const sorted = data.sort((a, b) => a.name.localeCompare(b.name));
         
-        const mcFiles = data.filter(file => 
+        // Collect thumbnail pngs first
+        allThumbs = {};
+        sorted.forEach(file => {
+          if (file.name.endsWith('.png')) {
+            const base = file.name.replace(/\.png$/,'');
+            allThumbs[base] = RAW_URL + file.name;
+          }
+        });
+
+        // Only show mcpack/mcworld files
+        const mcFiles = sorted.filter(file =>
           file.name.endsWith('.mcpack') || file.name.endsWith('.mcworld')
         ).map(file => ({
           name: file.name,
           download_url: RAW_URL + file.name,
-          size: file.size // File size in bytes
+          size: file.size, // File size in bytes
+          thumb: allThumbs[file.name.replace(/\.(mcpack|mcworld)$/,'')] || null
         }));
 
+        // Store for search use
         allFiles = mcFiles;
-        renderFiles(allFiles);
+
+        // Show only first 13
+        renderFiles(mcFiles.slice(0, limit));
+      } catch (error) {
+        fileList.innerHTML = `<div style="text-align:center;color:#ff5470;font-weight:bold;">Error: ${error.message}</div>`;
+      } finally {
+        loadingOverlay.style.display = 'none';
+      }
+    }
+
+    // Search files on repo and render results
+    async function searchFiles(query) {
+      loadingOverlay.style.display = 'flex';
+      try {
+        const response = await fetch(API_URL);
+        if (!response.ok) throw new Error('Failed to fetch repository contents.');
+        const data = await response.json();
+
+        // Collect thumbnails again
+        let thumbs = {};
+        data.forEach(file => {
+          if (file.name.endsWith('.png')) {
+            thumbs[file.name.replace(/\.png$/,'')] = RAW_URL + file.name;
+          }
+        });
+        // Filter files by query
+        const mcFiles = data.filter(file =>
+          (file.name.endsWith('.mcpack') || file.name.endsWith('.mcworld')) &&
+          file.name.toLowerCase().includes(query)
+        ).map(file => ({
+          name: file.name,
+          download_url: RAW_URL + file.name,
+          size: file.size,
+          thumb: thumbs[file.name.replace(/\.(mcpack|mcworld)$/,'')] || null
+        }));
+        renderFiles(mcFiles);
       } catch (error) {
         fileList.innerHTML = `<div style="text-align:center;color:#ff5470;font-weight:bold;">Error: ${error.message}</div>`;
       } finally {
@@ -233,19 +329,26 @@
         let div = document.createElement('div');
         div.className = 'file';
 
+        // Thumbnail
+        let thumb = document.createElement('img');
+        thumb.className = 'thumbnail';
+        thumb.src = file.thumb || 'https://minecraft.wiki/images/5/5e/Grass_Block.png?20230819204953'; // fallback
+        thumb.alt = "Thumbnail";
+        div.appendChild(thumb);
+
+        // File name
         let name = document.createElement('div');
         name.className = 'name';
         name.textContent = file.name;
         div.appendChild(name);
 
+        // Download button
         let actions = document.createElement('div');
         actions.className = 'actions';
-        
         let dl = document.createElement('button');
         dl.className = 'btn';
         dl.textContent = 'Download';
         dl.onclick = () => startDownload(file);
-
         actions.appendChild(dl);
         div.appendChild(actions);
         fileList.appendChild(div);
@@ -253,9 +356,12 @@
     }
 
     searchInput.addEventListener('input', () => {
-      const query = searchInput.value.toLowerCase();
-      const filteredFiles = allFiles.filter(file => file.name.toLowerCase().includes(query));
-      renderFiles(filteredFiles);
+      const query = searchInput.value.trim().toLowerCase();
+      if (query === "") {
+        renderFiles(allFiles.slice(0, 13));
+      } else {
+        searchFiles(query);
+      }
     });
 
     function humanFileSize(size) {
@@ -279,7 +385,7 @@
       let controller = new AbortController();
       currentDownload = controller;
 
-      // Prevent page close until download reached 100MB for >400MB file
+      // Prevent page close until download reached 30MB, always cancel on close
       function beforeUnloadHandler(e) {
         if (!allowClose) {
           e.preventDefault();
@@ -288,9 +394,8 @@
       }
       window.addEventListener('beforeunload', beforeUnloadHandler);
 
-      // If file > 400MB, allow close after 100MB downloaded
-      const FILE_MAX_CLOSE = 400 * 1024 * 1024; // 400MB
-      const FILE_UNLOCK_SIZE = 100 * 1024 * 1024; // 100MB
+      // If file > 30MB, allow close after 30MB downloaded
+      const FILE_UNLOCK_SIZE = 30 * 1024 * 1024; // 30MB
 
       fetch(file.download_url, {signal: controller.signal})
         .then(response => {
@@ -326,8 +431,8 @@
               progressText.textContent = 
                 `Downloaded ${humanFileSize(downloadedBytes)} of ${humanFileSize(total)} (${percent.toFixed(1)}%)`;
 
-              // If file >400MB and 100MB downloaded, unlock close/cancel
-              if (total > FILE_MAX_CLOSE && downloadedBytes >= FILE_UNLOCK_SIZE && !allowClose) {
+              // If file >30MB and 30MB downloaded, unlock close/cancel
+              if (total > FILE_UNLOCK_SIZE && downloadedBytes >= FILE_UNLOCK_SIZE && !allowClose) {
                 allowClose = true;
                 canCancel = true;
                 downloadCancelBtn.style.display = "";
@@ -358,6 +463,13 @@
         if (canCancel && currentDownload) {
           controller.abort();
           downloadCancelBtn.style.display = "none";
+        }
+      };
+
+      // Always cancel download if closed before 30MB
+      window.onunload = () => {
+        if (currentDownload && !allowClose) {
+          controller.abort();
         }
       };
     }
