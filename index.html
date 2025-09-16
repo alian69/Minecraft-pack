@@ -59,16 +59,6 @@
       text-align:center;
     }
     .actions{display:flex; gap:6px; justify-content:center; margin-top:8px;}
-    .thumb{
-      width:200px; 
-      height:200px; 
-      object-fit:cover; 
-      border-radius:12px; 
-      border:3px solid var(--accent);
-      display:block;
-      margin:0 auto 6px auto;
-      background: #191925;
-    }
     #loadingOverlay {
       position: fixed;
       top:0; left:0; right:0; bottom:0;
@@ -79,41 +69,76 @@
       justify-content: center;
       flex-direction: column;
     }
-    #loadingSpinner {
-      border: 6px solid #eee;
-      border-top: 6px solid var(--accent);
-      border-radius: 50%;
-      width: 60px; height: 60px;
-      animation: spin 0.9s linear infinite;
-      margin-bottom: 16px;
+    #downloadingScreen {
+      position: fixed;
+      top:0; left:0; right:0; bottom:0;
+      background: rgba(20,20,30,0.95);
+      z-index: 10000;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding-top: 90px;
     }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
+    #adsContainer {
+      width: 360px;
+      min-height: 60px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
-    #loadingText {
-      color: var(--accent);
-      font-weight: bold;
-      font-size: 1.2rem;
-      text-align: center;
+    #downloadBar {
+      width: 360px;
+      background: #232338;
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #progressBarContainer {
+      width: 100%;
+      background: #191925;
+      border-radius: 8px;
+      margin-top: 12px;
+      height: 22px;
+      overflow: hidden;
     }
     #progressBar {
-      width: 80%;
-      height: 20px;
-      background-color: #333;
-      border-radius: 10px;
-      overflow: hidden;
-      margin-top: 10px;
-    }
-    #progressFill {
+      background: linear-gradient(90deg,#7f5af0,#5ffbf1);
       height: 100%;
-      width: 0%;
-      background: linear-gradient(90deg, #7f5af0, #5ffbf1);
-      transition: width 0.3s ease;
+      width: 0;
+      transition: width 0.2s;
     }
-    #ad-container {
-      margin-bottom: 10px;
+    #progressText {
+      margin-top: 8px;
+      color: var(--accent);
+      font-weight: bold;
+      font-size: 1.1em;
+      text-align: center;
+    }
+    #downloadFileName {
+      font-size: 1.2em;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 6px;
+    }
+    #downloadCancelBtn {
+      background: linear-gradient(90deg,#ff5470,#ff96c0);
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 0;
+      cursor: pointer;
+      font-weight: 700;
+      margin-top: 18px;
+      display: none;
     }
   </style>
+  <!-- Google AdSense (replace with your own client/slot IDs) -->
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
 </head>
 <body>
   <header><h1>Minecraft packs</h1></header>
@@ -126,12 +151,30 @@
     <div class="files" id="fileList"></div>
   </div>
   <div id="loadingOverlay">
-    <div id="ad-container">
-      </div>
     <div id="loadingSpinner"></div>
-    <div id="loadingText">Downloading... <span id="loadingPercent">0%</span></div>
-    <div id="progressBar">
-      <div id="progressFill"></div>
+    <div id="loadingText">Loading files from GitHub...</div>
+  </div>
+  <!-- Downloading Screen -->
+  <div id="downloadingScreen">
+    <div id="adsContainer">
+      <!-- Google AdSense ad slot -->
+      <ins class="adsbygoogle"
+           style="display:block"
+           data-ad-client="ca-pub-xxxxxxxxxxxxxxxx"
+           data-ad-slot="1234567890"
+           data-ad-format="auto"
+           data-full-width-responsive="true"></ins>
+      <script>
+        (adsbygoogle = window.adsbygoogle || []).push({});
+      </script>
+    </div>
+    <div id="downloadBar">
+      <div id="downloadFileName"></div>
+      <div id="progressBarContainer">
+        <div id="progressBar"></div>
+      </div>
+      <div id="progressText"></div>
+      <button id="downloadCancelBtn">Cancel Download</button>
     </div>
   </div>
   <script>
@@ -143,12 +186,19 @@
     const fileList = document.getElementById('fileList');
     const loadingOverlay = document.getElementById('loadingOverlay');
     const searchInput = document.getElementById('searchInput');
-    const progressFill = document.getElementById('progressFill');
-    const loadingPercent = document.getElementById('loadingPercent');
+
+    // Download UI elements
+    const downloadingScreen = document.getElementById('downloadingScreen');
+    const downloadFileName = document.getElementById('downloadFileName');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    const downloadCancelBtn = document.getElementById('downloadCancelBtn');
 
     let allFiles = [];
+    let currentDownload = null;
 
     async function fetchFiles() {
+      loadingOverlay.style.display = 'flex';
       try {
         const response = await fetch(API_URL);
         if (!response.ok) {
@@ -160,7 +210,8 @@
           file.name.endsWith('.mcpack') || file.name.endsWith('.mcworld')
         ).map(file => ({
           name: file.name,
-          download_url: RAW_URL + file.name
+          download_url: RAW_URL + file.name,
+          size: file.size // File size in bytes
         }));
 
         allFiles = mcFiles;
@@ -172,56 +223,16 @@
       }
     }
 
-    async function downloadFile(url, fileName) {
-      loadingOverlay.style.display = 'flex';
-      progressFill.style.width = '0%';
-      loadingPercent.textContent = '0%';
-      
-      try {
-        const response = await fetch(url);
-        const reader = response.body.getReader();
-        const contentLength = +response.headers.get('Content-Length');
-        
-        let receivedLength = 0;
-        let chunks = [];
-        
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            break;
-          }
-          chunks.push(value);
-          receivedLength += value.length;
-          const percent = Math.round((receivedLength / contentLength) * 100);
-          progressFill.style.width = `${percent}%`;
-          loadingPercent.textContent = `${percent}%`;
-        }
-        
-        const blob = new Blob(chunks);
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = fileName;
-        a.click();
-        URL.revokeObjectURL(a.href);
-
-      } catch (error) {
-        alert('Download failed: ' + error.message);
-      } finally {
-        loadingOverlay.style.display = 'none';
-      }
-    }
-
     function renderFiles(filesToRender) {
       fileList.innerHTML = "";
       if (filesToRender.length === 0) {
         fileList.innerHTML = '<div style="text-align:center;color:#888">No .mcpack or .mcworld files found in the repository.</div>';
         return;
       }
-
       filesToRender.forEach(file => {
         let div = document.createElement('div');
         div.className = 'file';
-        
+
         let name = document.createElement('div');
         name.className = 'name';
         name.textContent = file.name;
@@ -233,8 +244,8 @@
         let dl = document.createElement('button');
         dl.className = 'btn';
         dl.textContent = 'Download';
-        dl.onclick = () => downloadFile(file.download_url, file.name);
-        
+        dl.onclick = () => startDownload(file);
+
         actions.appendChild(dl);
         div.appendChild(actions);
         fileList.appendChild(div);
@@ -246,6 +257,110 @@
       const filteredFiles = allFiles.filter(file => file.name.toLowerCase().includes(query));
       renderFiles(filteredFiles);
     });
+
+    function humanFileSize(size) {
+      if (size < 1024) return size + " B";
+      if (size < 1024 * 1024) return (size/1024).toFixed(1) + " KB";
+      if (size < 1024 * 1024 * 1024) return (size/1024/1024).toFixed(1) + " MB";
+      return (size/1024/1024/1024).toFixed(2) + " GB";
+    }
+
+    // Download logic with progress bar, lock close, ad, and cancel for large files
+    function startDownload(file) {
+      // Show downloading screen
+      downloadingScreen.style.display = 'flex';
+      downloadFileName.textContent = file.name + " (" + humanFileSize(file.size) + ")";
+      progressBar.style.width = "0";
+      progressText.textContent = "Starting download...";
+      downloadCancelBtn.style.display = "none";
+      let downloadedBytes = 0;
+      let allowClose = false;
+      let canCancel = false;
+      let controller = new AbortController();
+      currentDownload = controller;
+
+      // Prevent page close until download reached 100MB for >400MB file
+      function beforeUnloadHandler(e) {
+        if (!allowClose) {
+          e.preventDefault();
+          e.returnValue = '';
+        }
+      }
+      window.addEventListener('beforeunload', beforeUnloadHandler);
+
+      // If file > 400MB, allow close after 100MB downloaded
+      const FILE_MAX_CLOSE = 400 * 1024 * 1024; // 400MB
+      const FILE_UNLOCK_SIZE = 100 * 1024 * 1024; // 100MB
+
+      fetch(file.download_url, {signal: controller.signal})
+        .then(response => {
+          if (!response.ok) throw new Error("Failed to download file.");
+          const total = file.size || parseInt(response.headers.get('content-length')) || 0;
+          let reader = response.body.getReader();
+          let chunks = [];
+          function read() {
+            return reader.read().then(({done, value}) => {
+              if (done) {
+                // Download complete
+                window.removeEventListener('beforeunload', beforeUnloadHandler);
+                downloadingScreen.style.display = 'none';
+                currentDownload = null;
+                // Create blob and download
+                let blob = new Blob(chunks);
+                let url = URL.createObjectURL(blob);
+                let a = document.createElement('a');
+                a.href = url;
+                a.download = file.name;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                }, 500);
+                return;
+              }
+              chunks.push(value);
+              downloadedBytes += value.length;
+              let percent = total > 0 ? Math.min(100, ((downloadedBytes / total) * 100)) : 0;
+              progressBar.style.width = percent + "%";
+              progressText.textContent = 
+                `Downloaded ${humanFileSize(downloadedBytes)} of ${humanFileSize(total)} (${percent.toFixed(1)}%)`;
+
+              // If file >400MB and 100MB downloaded, unlock close/cancel
+              if (total > FILE_MAX_CLOSE && downloadedBytes >= FILE_UNLOCK_SIZE && !allowClose) {
+                allowClose = true;
+                canCancel = true;
+                downloadCancelBtn.style.display = "";
+                progressText.textContent += "\nYou can now safely close the page or cancel download.";
+              }
+              read();
+            }).catch(err => {
+              if (controller.signal.aborted) {
+                progressText.textContent = "Download cancelled.";
+              } else {
+                progressText.textContent = "Error during download.";
+              }
+              downloadingScreen.style.display = 'none';
+              window.removeEventListener('beforeunload', beforeUnloadHandler);
+              currentDownload = null;
+            });
+          }
+          read();
+        }).catch(err => {
+          progressText.textContent = "Error: " + err.message;
+          downloadingScreen.style.display = 'none';
+          window.removeEventListener('beforeunload', beforeUnloadHandler);
+          currentDownload = null;
+        });
+
+      // Cancel button logic
+      downloadCancelBtn.onclick = function() {
+        if (canCancel && currentDownload) {
+          controller.abort();
+          downloadCancelBtn.style.display = "none";
+        }
+      };
+    }
 
     fetchFiles();
   </script>
