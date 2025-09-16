@@ -1,5 +1,4 @@
 <!doctype html>
-
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -166,7 +165,7 @@
       #downloadBar, #adsContainerTop, #adsContainerBottom {width: 98vw;}
     }
   </style>
-  <!-- Google AdSense (replace with your own client/slot IDs) -->
+  <!-- Google AdSense (replace with your ad IDs) -->
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
 </head>
 <body>
@@ -231,7 +230,6 @@
     const loadingOverlay = document.getElementById('loadingOverlay');
     const searchInput = document.getElementById('searchInput');
 
-    // Download UI elements
     const downloadingScreen = document.getElementById('downloadingScreen');
     const downloadFileName = document.getElementById('downloadFileName');
     const progressBar = document.getElementById('progressBar');
@@ -242,76 +240,54 @@
     let allThumbs = {};
     let currentDownload = null;
 
-    // Load only 13 files first
+    // Recursively get all files (packs and images) from repo
+    async function fetchAllFiles(apiUrl = API_URL, prefix = '') {
+      const response = await fetch(apiUrl);
+      if (!response.ok) throw new Error('Failed to fetch repository contents.');
+      const data = await response.json();
+      let files = [];
+      for (const file of data) {
+        if (file.type === 'dir') {
+          files = files.concat(await fetchAllFiles(file.url, prefix + file.name + '/'));
+        } else {
+          files.push({ ...file, path: prefix + file.name });
+        }
+      }
+      return files;
+    }
+
     async function fetchFiles(limit = 13) {
       loadingOverlay.style.display = 'flex';
       try {
-        const response = await fetch(API_URL);
-        if (!response.ok) {
-          throw new Error('Failed to fetch repository contents. Please check your username and repository name.');
-        }
-        const data = await response.json();
-
+        const data = await fetchAllFiles();
         // Sort alphabetically for consistency
         const sorted = data.sort((a, b) => a.name.localeCompare(b.name));
-        
-        // Collect thumbnail pngs first
+        // Collect thumbnails (case-insensitive, use full path)
         allThumbs = {};
         sorted.forEach(file => {
-          if (file.name.endsWith('.png')) {
-            const base = file.name.replace(/\.png$/,'');
-            allThumbs[base] = RAW_URL + file.name;
+          if (file.name.toLowerCase().endsWith('.png')) {
+            // Key is lowercased base name (without extension)
+            const base = file.name.replace(/\.png$/i, '').toLowerCase();
+            allThumbs[base] = RAW_URL + file.path;
           }
         });
 
-        // Only show mcpack/mcworld files
+        // Only show strict .mcpack or .mcworld files, not .mcpack.txt etc
         const mcFiles = sorted.filter(file =>
-          file.name.endsWith('.mcpack') || file.name.endsWith('.mcworld')
+          file.name.match(/\.mcpack$/i) || file.name.match(/\.mcworld$/i)
         ).map(file => ({
           name: file.name,
-          download_url: RAW_URL + file.name,
-          size: file.size, // File size in bytes
-          thumb: allThumbs[file.name.replace(/\.(mcpack|mcworld)$/,'')] || null
+          download_url: RAW_URL + file.path,
+          size: file.size,
+          thumb: allThumbs[file.name.replace(/\.(mcpack|mcworld)$/i,'').toLowerCase()] || null
         }));
 
         // Store for search use
         allFiles = mcFiles;
 
-        // Show only first 13
-        renderFiles(mcFiles.slice(0, limit));
-      } catch (error) {
-        fileList.innerHTML = `<div style="text-align:center;color:#ff5470;font-weight:bold;">Error: ${error.message}</div>`;
-      } finally {
-        loadingOverlay.style.display = 'none';
-      }
-    }
-
-    // Search files on repo and render results
-    async function searchFiles(query) {
-      loadingOverlay.style.display = 'flex';
-      try {
-        const response = await fetch(API_URL);
-        if (!response.ok) throw new Error('Failed to fetch repository contents.');
-        const data = await response.json();
-
-        // Collect thumbnails again
-        let thumbs = {};
-        data.forEach(file => {
-          if (file.name.endsWith('.png')) {
-            thumbs[file.name.replace(/\.png$/,'')] = RAW_URL + file.name;
-          }
-        });
-        // Filter files by query
-        const mcFiles = data.filter(file =>
-          (file.name.endsWith('.mcpack') || file.name.endsWith('.mcworld')) &&
-          file.name.toLowerCase().includes(query)
-        ).map(file => ({
-          name: file.name,
-          download_url: RAW_URL + file.name,
-          size: file.size,
-          thumb: thumbs[file.name.replace(/\.(mcpack|mcworld)$/,'')] || null
-        }));
-        renderFiles(mcFiles);
+        // Show 13 random packs
+        const randomFiles = mcFiles.sort(() => Math.random() - 0.5).slice(0, limit);
+        renderFiles(randomFiles);
       } catch (error) {
         fileList.innerHTML = `<div style="text-align:center;color:#ff5470;font-weight:bold;">Error: ${error.message}</div>`;
       } finally {
@@ -332,8 +308,11 @@
         // Thumbnail
         let thumb = document.createElement('img');
         thumb.className = 'thumbnail';
-        thumb.src = file.thumb || 'https://minecraft.wiki/images/5/5e/Grass_Block.png?20230819204953'; // fallback
+        thumb.src = file.thumb || 'https://minecraft.wiki/images/5/5e/Grass_Block.png?20230819204953';
         thumb.alt = "Thumbnail";
+        thumb.onerror = function() {
+          thumb.src = 'https://minecraft.wiki/images/5/5e/Grass_Block.png?20230819204953';
+        };
         div.appendChild(thumb);
 
         // File name
@@ -358,9 +337,14 @@
     searchInput.addEventListener('input', () => {
       const query = searchInput.value.trim().toLowerCase();
       if (query === "") {
-        renderFiles(allFiles.slice(0, 13));
+        // Show random 13 again
+        const randomFiles = allFiles.sort(() => Math.random() - 0.5).slice(0, 13);
+        renderFiles(randomFiles);
       } else {
-        searchFiles(query);
+        const mcFiles = allFiles.filter(file =>
+          file.name.toLowerCase().includes(query)
+        );
+        renderFiles(mcFiles);
       }
     });
 
@@ -373,7 +357,6 @@
 
     // Download logic with progress bar, lock close, ad, and cancel for large files
     function startDownload(file) {
-      // Show downloading screen
       downloadingScreen.style.display = 'flex';
       downloadFileName.textContent = file.name + " (" + humanFileSize(file.size) + ")";
       progressBar.style.width = "0";
@@ -385,7 +368,6 @@
       let controller = new AbortController();
       currentDownload = controller;
 
-      // Prevent page close until download reached 30MB, always cancel on close
       function beforeUnloadHandler(e) {
         if (!allowClose) {
           e.preventDefault();
@@ -394,8 +376,8 @@
       }
       window.addEventListener('beforeunload', beforeUnloadHandler);
 
-      // If file > 30MB, allow close after 30MB downloaded
-      const FILE_UNLOCK_SIZE = 30 * 1024 * 1024; // 30MB
+      const FILE_UNLOCK_SIZE = 30 * 1024 * 1024;
+      const SLOW_SIZE = 5 * 1024 * 1024;
 
       fetch(file.download_url, {signal: controller.signal})
         .then(response => {
@@ -404,13 +386,11 @@
           let reader = response.body.getReader();
           let chunks = [];
           function read() {
-            return reader.read().then(({done, value}) => {
+            return reader.read().then(async ({done, value}) => {
               if (done) {
-                // Download complete
                 window.removeEventListener('beforeunload', beforeUnloadHandler);
                 downloadingScreen.style.display = 'none';
                 currentDownload = null;
-                // Create blob and download
                 let blob = new Blob(chunks);
                 let url = URL.createObjectURL(blob);
                 let a = document.createElement('a');
@@ -431,7 +411,10 @@
               progressText.textContent = 
                 `Downloaded ${humanFileSize(downloadedBytes)} of ${humanFileSize(total)} (${percent.toFixed(1)}%)`;
 
-              // If file >30MB and 30MB downloaded, unlock close/cancel
+              if (total <= SLOW_SIZE) {
+                await new Promise(r => setTimeout(r, 100));
+              }
+
               if (total > FILE_UNLOCK_SIZE && downloadedBytes >= FILE_UNLOCK_SIZE && !allowClose) {
                 allowClose = true;
                 canCancel = true;
@@ -458,7 +441,6 @@
           currentDownload = null;
         });
 
-      // Cancel button logic
       downloadCancelBtn.onclick = function() {
         if (canCancel && currentDownload) {
           controller.abort();
@@ -466,7 +448,6 @@
         }
       };
 
-      // Always cancel download if closed before 30MB
       window.onunload = () => {
         if (currentDownload && !allowClose) {
           controller.abort();
