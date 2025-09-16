@@ -74,7 +74,7 @@
       top:0; left:0; right:0; bottom:0;
       background: rgba(20,20,30,0.85);
       z-index: 9999;
-      display: flex;
+      display: none;
       align-items: center;
       justify-content: center;
       flex-direction: column;
@@ -96,6 +96,23 @@
       font-size: 1.2rem;
       text-align: center;
     }
+    #progressBar {
+      width: 80%;
+      height: 20px;
+      background-color: #333;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+    #progressFill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #7f5af0, #5ffbf1);
+      transition: width 0.3s ease;
+    }
+    #ad-container {
+      margin-bottom: 10px;
+    }
   </style>
 </head>
 <body>
@@ -109,8 +126,13 @@
     <div class="files" id="fileList"></div>
   </div>
   <div id="loadingOverlay">
+    <div id="ad-container">
+      </div>
     <div id="loadingSpinner"></div>
-    <div id="loadingText">Loading files from GitHub...</div>
+    <div id="loadingText">Downloading... <span id="loadingPercent">0%</span></div>
+    <div id="progressBar">
+      <div id="progressFill"></div>
+    </div>
   </div>
   <script>
     const GH_USERNAME = "alian69";
@@ -121,6 +143,8 @@
     const fileList = document.getElementById('fileList');
     const loadingOverlay = document.getElementById('loadingOverlay');
     const searchInput = document.getElementById('searchInput');
+    const progressFill = document.getElementById('progressFill');
+    const loadingPercent = document.getElementById('loadingPercent');
 
     let allFiles = [];
 
@@ -136,25 +160,52 @@
           file.name.endsWith('.mcpack') || file.name.endsWith('.mcworld')
         ).map(file => ({
           name: file.name,
-          download_url: RAW_URL + file.name,
-          thumbnail_url: null
+          download_url: RAW_URL + file.name
         }));
-
-        const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
-        mcFiles.forEach(mcFile => {
-          const baseName = mcFile.name.split('.').slice(0, -1).join('.');
-          const thumbFile = data.find(file => 
-            imageExtensions.some(ext => file.name === `${baseName}${ext}`)
-          );
-          if (thumbFile) {
-            mcFile.thumbnail_url = RAW_URL + thumbFile.name;
-          }
-        });
 
         allFiles = mcFiles;
         renderFiles(allFiles);
       } catch (error) {
         fileList.innerHTML = `<div style="text-align:center;color:#ff5470;font-weight:bold;">Error: ${error.message}</div>`;
+      } finally {
+        loadingOverlay.style.display = 'none';
+      }
+    }
+
+    async function downloadFile(url, fileName) {
+      loadingOverlay.style.display = 'flex';
+      progressFill.style.width = '0%';
+      loadingPercent.textContent = '0%';
+      
+      try {
+        const response = await fetch(url);
+        const reader = response.body.getReader();
+        const contentLength = +response.headers.get('Content-Length');
+        
+        let receivedLength = 0;
+        let chunks = [];
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          chunks.push(value);
+          receivedLength += value.length;
+          const percent = Math.round((receivedLength / contentLength) * 100);
+          progressFill.style.width = `${percent}%`;
+          loadingPercent.textContent = `${percent}%`;
+        }
+        
+        const blob = new Blob(chunks);
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = fileName;
+        a.click();
+        URL.revokeObjectURL(a.href);
+
+      } catch (error) {
+        alert('Download failed: ' + error.message);
       } finally {
         loadingOverlay.style.display = 'none';
       }
@@ -171,13 +222,6 @@
         let div = document.createElement('div');
         div.className = 'file';
         
-        if (file.thumbnail_url) {
-          let thumb = document.createElement('img');
-          thumb.className = 'thumb';
-          thumb.src = file.thumbnail_url;
-          div.appendChild(thumb);
-        }
-
         let name = document.createElement('div');
         name.className = 'name';
         name.textContent = file.name;
@@ -186,11 +230,10 @@
         let actions = document.createElement('div');
         actions.className = 'actions';
         
-        let dl = document.createElement('a');
+        let dl = document.createElement('button');
         dl.className = 'btn';
         dl.textContent = 'Download';
-        dl.href = file.download_url;
-        dl.download = file.name;
+        dl.onclick = () => downloadFile(file.download_url, file.name);
         
         actions.appendChild(dl);
         div.appendChild(actions);
